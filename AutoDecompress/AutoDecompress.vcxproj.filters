@@ -13,10 +13,21 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Aplib">
+      <UniqueIdentifier>{85f947d3-6cd8-4ed8-a648-9ce5fe71eae3}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AutoDecompress.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="aplib\depacks.c">
+      <Filter>Aplib</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="aplib\depacks.h">
+      <Filter>Aplib</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
