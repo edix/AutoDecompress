@@ -6,7 +6,7 @@
 //
 // ida pro reference: http://www.openrce.org/reference_library/ida_sdk
 //
-// fyi: unfinished yet, still working on it - xedi, Mai 2015
+// fyi: unfinished yet, still working on it - xedi, May 2015
 // 
 //
 
