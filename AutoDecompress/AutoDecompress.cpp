@@ -5,6 +5,8 @@
 // aplib, zip, xor, shift, ror, rot13
 //
 // ida pro reference: http://www.openrce.org/reference_library/ida_sdk
+//
+// fyi: unfinished yet, still working on it - xedi, Mai 2015
 // 
 //
 
@@ -16,6 +18,7 @@
 #include <entry.hpp>
 #include <bytes.hpp>
 #include <funcs.hpp>
+#include <diskio.hpp>
 
 #include "aplib/depacks.h"
 
@@ -78,11 +81,29 @@ bool UnpackAplibAtAddress(ea_t address)
 							//
 							// ok, decompression is valid valid
 							//
-							msg("AutoDecompress: APLIB: decompressed %u bytes\n", uiOutputLength);
+							msg("AutoDecompress: APLIB: decompressed %u bytes, compressed %u bytes\n", uiOutputLength, uiCompressedSize);
 
 							//
-							// todo: save somewhere :|
+							// check if output length is bigger than data, if so then please save it to a file because we can't add new bytes
 							//
+							msg("AutoDecompress: APLIB: I will unpack %u bytes (excluding header) in this file and store the whole binary in aplib_dump.bin\n", uiCompressedSize - header.header_size);
+
+							patch_many_bytes(address + header.header_size, pDestination, uiCompressedSize - header.header_size);
+
+							//
+							// now save to file to the current directory
+							//
+							FILE* pDump = ecreate("aplib_dump.bin");
+							if (pDump)
+							{
+								ewrite(pDump, pDestination, uiDecompressedSize);
+								eclose(pDump);
+								msg("AutoDecompress: APLIB: full decompressed file can be found in current directory: aplib_dump.bin\n");
+							}
+							else
+							{
+								msg("AutoDecompress: APLIB: failed to create file aplib_dump.bin\n");
+							}
 
 							fResult = true;
 						}
