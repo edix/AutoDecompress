@@ -88,7 +88,18 @@ bool UnpackAplibAtAddress(ea_t address)
 							//
 							msg("AutoDecompress: APLIB: I will unpack %u bytes (excluding header) in this file and store the whole binary in aplib_dump.bin\n", uiCompressedSize - header.header_size);
 
+							//
+							// replace the header with zeros
+							//
+							for (size_t n = 0; n < header.header_size; n++)
+							{
+								set_cmt(address, "APLIB header found\n", true);
+								patch_byte(address + n, 0x00);
+							}
+
 							patch_many_bytes(address + header.header_size, pDestination, uiCompressedSize - header.header_size);
+
+							set_cmt(address + header.header_size, "APLIB data found", true);
 
 							//
 							// now save to file to the current directory
@@ -182,6 +193,10 @@ void idaapi run(int)
 			{
 				msg("AutoDecompress: APLIB unpacking failed at %a\n.", address);
 			}
+			break;
+
+		case 3:
+			
 			break;
 		default:
 			msg("unknown selection: %u\n", uiSelect);
