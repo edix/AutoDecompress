@@ -89,6 +89,11 @@ bool UnpackAplibAtAddress(ea_t address)
 							msg("AutoDecompress: APLIB: I will unpack %u bytes (excluding header) in this file and store the whole binary in aplib_dump.bin\n", uiCompressedSize - header.header_size);
 
 							//
+							// undef
+							//
+							do_unknown_range(address, header.header_size + uiCompressedSize, DOUNK_SIMPLE);
+
+							//
 							// replace the header with zeros
 							//
 							for (size_t n = 0; n < header.header_size; n++)
@@ -145,6 +150,78 @@ bool UnpackAplibAtAddress(ea_t address)
 }
 
 
+enum unpack_type
+{
+	unpack_xor = 0,
+	unpack_shl,
+	unpack_shr,
+	unpack_rol,
+	unpack_ror
+};
+
+bool UnpackSimple(ea_t startaddress, ea_t endaddress, unpack_type type, char* szKey, size_t KeyLength)
+{
+	bool fResult = true;
+	size_t nKey = 0;
+
+	//
+	// undef
+	//
+	do_unknown_range(startaddress, endaddress - startaddress, DOUNK_SIMPLE);
+
+	//
+	// patch byte to byte
+	//
+	for (ea_t address = startaddress; address < endaddress; address++, nKey++)
+	{
+		uchar c = get_byte(address);
+
+
+		//
+		// rotate key
+		//
+		if (nKey >= KeyLength)
+		{
+			nKey = 0;
+		}
+		
+		switch (type)
+		{
+		case unpack_xor:
+			c ^= szKey[nKey];
+			break;
+		case unpack_shl:
+			c = c << szKey[nKey];
+			break;
+		case unpack_shr:
+			c = c >> szKey[nKey];
+			break;
+		case unpack_rol:
+			c = ((c << szKey[nKey]) | (c >> (32 - szKey[nKey])));
+			break;
+		case unpack_ror:
+			c = ((c >> szKey[nKey]) | (c << (32 - szKey[nKey])));
+			break;
+		default:
+			msg("AutoDecompress: UNPACK UNKNOWN\n");
+		}
+
+	
+
+		if (!patch_byte(address, c))
+		{
+			fResult = false;
+			msg("AutoDecompress: unpack %u failed at address %a in patch_byte\n", type, address);
+			break;
+
+		}
+
+	}
+
+	return true;
+}
+
+
 //void idaapi button_func(TView *fields[], int code)
 //{
 //	msg("The button was pressed!\n");
@@ -166,7 +243,8 @@ void idaapi run(int)
 	char *szDialogForm =
 		"STARTITEM 0\n"
 		"AutoDecompress\n\n"
-		"<Enter decryption key:A:16:16::>\n"					// unused right now, should be a XOR key or something...
+		"<Enter decryption key            :A:16:16::>\n"								// unused right now, should be a XOR key or something...
+		"<Enter size to decrypt (dec, opt):D::16::>\n"					
 		"<##Please select your decryption method##APLIB:R>\n"
 		"<Shift left:R>\n"
 		"<Shift right:R>\n"
@@ -176,8 +254,9 @@ void idaapi run(int)
 	char szKey[MAXSTR];
 	ushort uiSelect = 0;
 	qstrncpy(szKey, "", sizeof(szKey));
+	sval_t ulLength = 0;
 
-	if (AskUsingForm_c(szDialogForm, szKey, &uiSelect/*, button_func*/) == 1)
+	if (AskUsingForm_c(szDialogForm, szKey, &ulLength, &uiSelect/*, button_func*/) == 1)
 	{
 		ea_t address;
 		address = get_screen_ea();
@@ -196,7 +275,21 @@ void idaapi run(int)
 			break;
 
 		case 3:
-			
+			if (ulLength == 0)
+			{
+				//
+				// repeat until patch_byte fails...
+				//
+				ulLength = (sval_t)-1;
+			}
+			if (UnpackSimple(address, address + ulLength, unpack_xor, szKey, (size_t)strlen(szKey)))
+			{
+				msg("AutoDecompress: XOR: decrypted\n");
+			}
+			else
+			{
+				msg("AutoDecompress: XOR: failed\n");
+			}
 			break;
 		default:
 			msg("unknown selection: %u\n", uiSelect);
