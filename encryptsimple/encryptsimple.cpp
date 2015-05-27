@@ -3,13 +3,15 @@
 
 #include "stdafx.h"
 
+
 enum unpack_type
 {
 	unpack_xor = 0,
 	unpack_shl,
 	unpack_shr,
 	unpack_rol,
-	unpack_ror
+	unpack_ror, 
+	unpack_rc4
 };
 
 bool EncryptSimple(char* szFilename, unpack_type type, char* szKey, size_t KeyLength)
@@ -36,40 +38,56 @@ bool EncryptSimple(char* szFilename, unpack_type type, char* szKey, size_t KeyLe
 				ReadFile(hFile, pBuffer, dwFileSize, &dwReadBytes, NULL);
 				if (dwReadBytes == dwFileSize)
 				{
-					unsigned char c;
-					for (DWORD x = 0; x < dwFileSize; x++, nKey++)
+					if (type == unpack_rc4)
 					{
-
 						//
-						// rotate key
+						// rc4
 						//
-						if (nKey >= KeyLength)
+						rc4_key_t key;
+						rc4_set_key((unsigned char*)szKey, KeyLength, &key);
+						rc4_crypt(pBuffer, dwFileSize, &key);
+					}
+					else
+					{
+						//
+						// xor, shl, shr, rol, ror
+						//
+
+						unsigned char c;
+						for (DWORD x = 0; x < dwFileSize; x++, nKey++)
 						{
-							nKey = 0;
+
+							//
+							// rotate key
+							//
+							if (nKey >= KeyLength)
+							{
+								nKey = 0;
+							}
+
+							c = pBuffer[x];
+							switch (type)
+							{
+							case unpack_xor:
+								c ^= szKey[nKey];
+								break;
+							case unpack_shl:
+								c = c << szKey[nKey];
+								break;
+							case unpack_shr:
+								c = c >> szKey[nKey];
+								break;
+							case unpack_rol:
+								c = ((c << szKey[nKey]) | (c >> (32 - szKey[nKey])));
+								break;
+							case unpack_ror:
+								c = ((c >> szKey[nKey]) | (c << (32 - szKey[nKey])));
+								break;
+							}
+
+							pBuffer[x] = c;
+
 						}
-
-						c = pBuffer[x];
-						switch (type)
-						{
-						case unpack_xor:
-							c ^= szKey[nKey];
-							break;
-						case unpack_shl:
-							c = c << szKey[nKey];
-							break;
-						case unpack_shr:
-							c = c >> szKey[nKey];
-							break;
-						case unpack_rol:
-							c = ((c << szKey[nKey]) | (c >> (32 - szKey[nKey])));
-							break;
-						case unpack_ror:
-							c = ((c >> szKey[nKey]) | (c << (32 - szKey[nKey])));
-							break;
-						}
-
-						pBuffer[x] = c;
-
 					}
 				}
 				WriteFile(hFile2, pBuffer, dwFileSize, &dwReadBytes, NULL);
@@ -92,7 +110,7 @@ int main(int argc, char* argv[])
 
 	if (argc != 4)
 	{
-		printf("invalid parameters!\n\nusage:\nencrypt.exe filename type key\ntype: xor, shl, shr, ror, rol\nkey: 1 - 8 bytes");
+		printf("invalid parameters!\n\nusage:\nencrypt.exe filename type key\ntype: xor, shl, shr, ror, rol, rc4\nkey: 1 - 8 bytes");
 		return 0;
 	}
 
@@ -121,6 +139,10 @@ int main(int argc, char* argv[])
 	else if (_stricmp((const char*)argv[2], "ror") == 0)
 	{
 		type = unpack_ror;
+	}
+	else if (_stricmp((const char*)argv[2], "rc4") == 0)
+	{
+		type = unpack_rc4;
 	}
 
 

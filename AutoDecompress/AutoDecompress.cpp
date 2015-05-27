@@ -21,10 +21,70 @@
 #include <diskio.hpp>
 
 #include "aplib/depacks.h"
+#include "rc4/rc4.h"
+
+static const uint32 uiMaxCompressionSize = 0x100000;
+
+//
+// global variables
+//
+char g_szKey[MAXSTR] = { 0 };
+ushort g_rbSelection = 0;
+sval_t g_FileLength = (sval_t)-1;
+
+
 
 int idaapi init(void)
 {
 	return PLUGIN_OK;
+}
+
+bool DumpBufferToFile(const char* szDumpType, const char* szFilename, uchar* pBuffer, size_t nBufferSize)
+{
+	FILE* pDump = ecreate(szFilename);
+	if (pDump)
+	{
+		ewrite(pDump, pBuffer, nBufferSize);
+		eclose(pDump);
+		msg("AutoDecompress: %s: file dumped to in current directory: %s\n", szDumpType, szFilename);
+		return true;
+	}
+	return false;
+}
+
+size_t GetLoadedFileSize()
+{
+	//
+	// todo: is there an easier way to figure out how big the file is!?
+	//
+
+	size_t nResult = 0;
+	ea_t address = get_screen_ea();
+	if (address == BADADDR)
+		return nResult;
+
+	ea_t maxitem, maxitem2;
+	maxitem = address;
+
+	while (1)
+	{
+		maxitem2 = calc_max_item_end(maxitem);
+		if (maxitem2 != BADADDR && maxitem2 != maxitem)
+		{
+			maxitem = maxitem2;
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	if (maxitem != BADADDR && maxitem2 != BADADDR)
+	{
+		nResult = maxitem - address;
+	}
+	
+	return nResult;
 }
 
 bool UnpackAplibAtAddress(ea_t address)
@@ -40,13 +100,11 @@ bool UnpackAplibAtAddress(ea_t address)
 	};
 
 	APLIB_HEADER header;
-	unsigned char* pDestination = nullptr;
-	unsigned char* pCompressed = nullptr;
+	uchar* pDestination = nullptr;
+	uchar* pCompressed = nullptr;
 	uint32 uiCompressedSize, uiDecompressedSize;
 	uint uiOutputLength;
 	bool fResult = false;
-
-	const uint32 uiMaxCompressionSize = 0x100000;
 
 	if (get_many_bytes(address, &header, sizeof(header)))
 	{
@@ -65,8 +123,8 @@ bool UnpackAplibAtAddress(ea_t address)
 			//
 			if (uiCompressedSize <= uiMaxCompressionSize && uiDecompressedSize <= uiMaxCompressionSize)
 			{
-				pCompressed = new unsigned char[uiCompressedSize];
-				pDestination = new unsigned char[uiDecompressedSize];
+				pCompressed = new uchar[uiCompressedSize];
+				pDestination = new uchar[uiDecompressedSize];
 
 				if (pCompressed && pDestination)
 				{
@@ -109,14 +167,7 @@ bool UnpackAplibAtAddress(ea_t address)
 							//
 							// now save to file to the current directory
 							//
-							FILE* pDump = ecreate("aplib_dump.bin");
-							if (pDump)
-							{
-								ewrite(pDump, pDestination, uiDecompressedSize);
-								eclose(pDump);
-								msg("AutoDecompress: APLIB: full decompressed file can be found in current directory: aplib_dump.bin\n");
-							}
-							else
+							if (!DumpBufferToFile("APLIB", "aplib_dump.bin", pDestination, uiDecompressedSize))
 							{
 								msg("AutoDecompress: APLIB: failed to create file aplib_dump.bin\n");
 							}
@@ -156,10 +207,11 @@ enum unpack_type
 	unpack_shl,
 	unpack_shr,
 	unpack_rol,
-	unpack_ror
+	unpack_ror,
+	unpack_rc4,
 };
 
-bool UnpackSimple(ea_t startaddress, ea_t endaddress, unpack_type type, char* szKey, size_t KeyLength)
+bool UnpackSimple(ea_t startaddress, size_t nSize, unpack_type type, char* szKey, size_t nKeyLength)
 {
 	bool fResult = true;
 	size_t nKey = 0;
@@ -167,12 +219,12 @@ bool UnpackSimple(ea_t startaddress, ea_t endaddress, unpack_type type, char* sz
 	//
 	// undef
 	//
-	do_unknown_range(startaddress, endaddress - startaddress, DOUNK_SIMPLE);
+	do_unknown_range(startaddress, nSize, DOUNK_SIMPLE);
 
 	//
 	// patch byte to byte
 	//
-	for (ea_t address = startaddress; address < endaddress; address++, nKey++)
+	for (ea_t address = startaddress; address < startaddress + nSize; address++, nKey++)
 	{
 		uchar c = get_byte(address);
 
@@ -180,7 +232,7 @@ bool UnpackSimple(ea_t startaddress, ea_t endaddress, unpack_type type, char* sz
 		//
 		// rotate key
 		//
-		if (nKey >= KeyLength)
+		if (nKey >= nKeyLength)
 		{
 			nKey = 0;
 		}
@@ -221,12 +273,103 @@ bool UnpackSimple(ea_t startaddress, ea_t endaddress, unpack_type type, char* sz
 	return true;
 }
 
+bool UnpackRc4(ea_t startaddress, size_t nSize, char* szKey, size_t nKeyLength)
+{
+	if (nSize == 0 || nSize >= uiMaxCompressionSize)
+	{
+		msg("AutoDecompress: RC4: invalid size %u bytes\n", nSize);
+		return false;
+	}
 
-//void idaapi button_func(TView *fields[], int code)
-//{
-//	msg("The button was pressed!\n");
-//}
+	//
+	// undef
+	//
+	do_unknown_range(startaddress, nSize, DOUNK_SIMPLE);
 
+	uchar * pBuffer = new uchar[nSize];
+
+	//
+	// get data 
+	//
+	if (!pBuffer || !get_many_bytes(startaddress, pBuffer, nSize))
+	{
+		msg("AutoDecompress: RC4: get_many_bytes failed\n");
+		delete[] pBuffer;
+		return false;
+	}
+
+	//
+	// decrypt and patch
+	//
+
+	rc4_key_t key;
+	rc4_set_key((uchar*)szKey, nKeyLength, &key);
+	rc4_crypt(pBuffer, nSize, &key);
+	patch_many_bytes(startaddress, pBuffer, nSize);
+
+	//
+	// dump file to disk
+	//
+	if (!DumpBufferToFile("RC4", "rc4_dump.bin", pBuffer, nSize))
+	{
+		msg("AutoDecompress: RC4: failed to create file aplib_dump.bin\n");
+	}
+
+	delete[] pBuffer;
+	
+	msg("AutoDecompress: RC4: finished.\n");
+
+	return true;
+}
+
+
+static int idaapi mycallback(int field_id, form_actions_t& fa)
+{
+	ushort val = 0;
+
+	switch (field_id)
+	{
+	case CB_INIT:
+		//
+		// aplib is default
+		//
+		/*fa.enable_field(1, false);
+		fa.enable_field(2, false);*/
+		if (g_rbSelection >= 0 )
+			mycallback(g_rbSelection + 3, fa);
+		break;
+	case 1:		// key
+	case 2:		// size
+		break;
+
+	case 3:		// aplib
+		if (!fa.get_radiobutton_value(field_id, &val))
+			INTERR(1337);
+		fa.enable_field(1, !val);
+		fa.enable_field(2, !val);
+		break;
+
+	case 4:		// rc4
+	case 5:		// xor
+	case 6:		// shl
+	case 7:		// shr
+	case 8:		// rol
+	case 9:		// ror
+		if (!fa.get_radiobutton_value(field_id, &val))
+			INTERR(1337);
+		fa.enable_field(1, true);
+		fa.enable_field(2, true);
+		
+	
+		break;
+	default:
+		msg("callback: %d\n", field_id);
+		break;
+	}
+
+
+	return 1;
+}
 
 void idaapi run(int)
 {
@@ -240,30 +383,50 @@ void idaapi run(int)
 	//
 	// select dialog for unpacking type
 	//
-	char *szDialogForm =
+	//   <label:type:width:swidth:@hlp[]>
+
+	char *szPreDialogForm =
 		"STARTITEM 0\n"
-		"AutoDecompress\n\n"
-		"<Enter decryption key            :A:16:16::>\n"								// unused right now, should be a XOR key or something...
-		"<Enter size to decrypt (dec, opt):D::16::>\n"					
-		"<##Please select your decryption method##APLIB:R>\n"
-		"<Shift left:R>\n"
-		"<Shift right:R>\n"
-		"<XOR:R>>\n";
+		"AutoDecompress at 0x%08x\n\n"
+		"%s\n"
+		"<Enter decryption key   :A1:16:16::>\n"
+		"<Enter size to decrypt  :D2::16::>\n\n"
+		"<##Please select your decryption method##APLIB:R3>\n"
+		"<RC4:R4>\n"
+		"<XOR:R5>\n"
+		"<Shift left:R6>\n"
+		"<Shift right:R7>\n"
+		"<Rotate left:R8>\n"
+		"<Rotate right:R9>>\n";
 
-
-	char szKey[MAXSTR];
-	ushort uiSelect = 0;
-	qstrncpy(szKey, "", sizeof(szKey));
-	sval_t ulLength = 0;
-
-	if (AskUsingForm_c(szDialogForm, szKey, &ulLength, &uiSelect/*, button_func*/) == 1)
+	ea_t address;
+	address = get_screen_ea();
+	if (address == BADADDR)
 	{
-		ea_t address;
-		address = get_screen_ea();
+		msg("AutoDecompress: please select a valid address\n");
+		return;
+	}
 
-		switch (uiSelect)
+	if (g_FileLength == (sval_t)-1)
+		g_FileLength = GetLoadedFileSize();
+
+	char szDialogForm[1024] = { 0 };
+
+	qsnprintf(szDialogForm, sizeof(szDialogForm)/sizeof(szDialogForm[0]), szPreDialogForm, (uint32)address, "%/");
+
+	if (AskUsingForm_c(szDialogForm, mycallback, g_szKey, &g_FileLength, &g_rbSelection) == 1)
+	{
+		if (g_FileLength == 0 || g_FileLength < 0)
+		{
+			g_FileLength = GetLoadedFileSize();
+		}
+
+		switch (g_rbSelection)
 		{
 		case 0:
+			//
+			// aplib
+			//
 			if (UnpackAplibAtAddress(address))
 			{
 				msg("AutoDecompress: unpacked data at address %a with aplib.\n", address);
@@ -274,15 +437,25 @@ void idaapi run(int)
 			}
 			break;
 
-		case 3:
-			if (ulLength == 0)
+		case 1:
+			//
+			// RC4
+			//
+			if (UnpackRc4(address, g_FileLength, g_szKey, (size_t)strlen(g_szKey)))
 			{
-				//
-				// repeat until patch_byte fails...
-				//
-				ulLength = (sval_t)-1;
+				msg("AutoDecompress: RC4: decrypted\n");
 			}
-			if (UnpackSimple(address, address + ulLength, unpack_xor, szKey, (size_t)strlen(szKey)))
+			else
+			{
+				msg("AutoDecompress: RC4: failed\n");
+			}
+			break;
+
+		case 2:
+			//
+			// XOR
+			//
+			if (UnpackSimple(address, g_FileLength, unpack_xor, g_szKey, (size_t)strlen(g_szKey)))
 			{
 				msg("AutoDecompress: XOR: decrypted\n");
 			}
@@ -291,8 +464,15 @@ void idaapi run(int)
 				msg("AutoDecompress: XOR: failed\n");
 			}
 			break;
+
+		case 3:	// shl
+		case 4:	// shr
+		case 5:	// rol
+		case 6:	// ror
+
+
 		default:
-			msg("unknown selection: %u\n", uiSelect);
+			msg("unknown selection: %u\n", g_rbSelection);
 		}
 	}
 }

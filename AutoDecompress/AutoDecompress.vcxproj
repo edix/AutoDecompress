@@ -167,9 +167,11 @@
   <ItemGroup>
     <ClCompile Include="aplib\depacks.c" />
     <ClCompile Include="AutoDecompress.cpp" />
+    <ClCompile Include="rc4\rc4.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="aplib\depacks.h" />
+    <ClInclude Include="rc4\rc4.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -16,6 +16,9 @@
     <Filter Include="Aplib">
       <UniqueIdentifier>{85f947d3-6cd8-4ed8-a648-9ce5fe71eae3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="RC4">
+      <UniqueIdentifier>{d10dbbb4-2979-459e-ab32-d0954edfe977}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AutoDecompress.cpp">
@@ -24,10 +27,16 @@
     <ClCompile Include="aplib\depacks.c">
       <Filter>Aplib</Filter>
     </ClCompile>
+    <ClCompile Include="rc4\rc4.cpp">
+      <Filter>RC4</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="aplib\depacks.h">
       <Filter>Aplib</Filter>
+    </ClInclude>
+    <ClInclude Include="rc4\rc4.h">
+      <Filter>RC4</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

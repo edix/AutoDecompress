@@ -11,6 +11,8 @@
 #include <tchar.h>
 #include <Windows.h>
 
-
+#include <stddef.h>
+#include <algorithm>
+#include "rc4/rc4.h"
 
 // TODO: reference additional headers your program requires here
