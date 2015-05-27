@@ -2,7 +2,7 @@
 //
 // AutoDecompress by xedi
 // IDA Pro Plugin to unpack data at given offset, unpack:
-// aplib, zip, xor, shift, ror, rot13
+// aplib, rc4, xor, shift, rotate
 //
 // ida pro reference: http://www.openrce.org/reference_library/ida_sdk
 //
@@ -23,21 +23,16 @@
 #include "aplib/depacks.h"
 #include "rc4/rc4.h"
 
-static const uint32 uiMaxCompressionSize = 0x100000;
+static const uint32 g_uiMaxSize = 0x100000;
 
 //
-// global variables
+// global variables, so when we re-open the dialog the values will still exist in memory
 //
 char g_szKey[MAXSTR] = { 0 };
 ushort g_rbSelection = 0;
 sval_t g_FileLength = (sval_t)-1;
 
 
-
-int idaapi init(void)
-{
-	return PLUGIN_OK;
-}
 
 bool DumpBufferToFile(const char* szDumpType, const char* szFilename, uchar* pBuffer, size_t nBufferSize)
 {
@@ -121,7 +116,7 @@ bool UnpackAplibAtAddress(ea_t address)
 			//
 			// only 1 MB for now
 			//
-			if (uiCompressedSize <= uiMaxCompressionSize && uiDecompressedSize <= uiMaxCompressionSize)
+			if (uiCompressedSize <= g_uiMaxSize && uiDecompressedSize <= g_uiMaxSize)
 			{
 				pCompressed = new uchar[uiCompressedSize];
 				pDestination = new uchar[uiDecompressedSize];
@@ -187,7 +182,7 @@ bool UnpackAplibAtAddress(ea_t address)
 			}
 			else
 			{
-				msg("AutoDecompress: APLIB: compress or decompress size is invalid (compress: %u bytes, decompress: %u bytes, max: %u bytes), aborting...\n", uiCompressedSize, uiDecompressedSize, uiMaxCompressionSize);
+				msg("AutoDecompress: APLIB: compress or decompress size is invalid (compress: %u bytes, decompress: %u bytes, max: %u bytes), aborting...\n", uiCompressedSize, uiDecompressedSize, g_uiMaxSize);
 			}
 
 		}
@@ -275,7 +270,7 @@ bool UnpackSimple(ea_t startaddress, size_t nSize, unpack_type type, char* szKey
 
 bool UnpackRc4(ea_t startaddress, size_t nSize, char* szKey, size_t nKeyLength)
 {
-	if (nSize == 0 || nSize >= uiMaxCompressionSize)
+	if (nSize == 0 || nSize >= g_uiMaxSize)
 	{
 		msg("AutoDecompress: RC4: invalid size %u bytes\n", nSize);
 		return false;
@@ -323,7 +318,7 @@ bool UnpackRc4(ea_t startaddress, size_t nSize, char* szKey, size_t nKeyLength)
 }
 
 
-static int idaapi mycallback(int field_id, form_actions_t& fa)
+static int idaapi DialogCallback(int field_id, form_actions_t& fa)
 {
 	ushort val = 0;
 
@@ -331,12 +326,10 @@ static int idaapi mycallback(int field_id, form_actions_t& fa)
 	{
 	case CB_INIT:
 		//
-		// aplib is default
+		// select the last element
 		//
-		/*fa.enable_field(1, false);
-		fa.enable_field(2, false);*/
-		if (g_rbSelection >= 0 )
-			mycallback(g_rbSelection + 3, fa);
+		if (g_rbSelection >= 0 )	// huehuehue
+			DialogCallback(g_rbSelection + 3, fa);	
 		break;
 	case 1:		// key
 	case 2:		// size
@@ -369,6 +362,11 @@ static int idaapi mycallback(int field_id, form_actions_t& fa)
 
 
 	return 1;
+}
+
+int idaapi init(void)
+{
+	return PLUGIN_OK;
 }
 
 void idaapi run(int)
@@ -410,12 +408,17 @@ void idaapi run(int)
 	if (g_FileLength == (sval_t)-1)
 		g_FileLength = GetLoadedFileSize();
 
+	//
+	// I wasnt able to figure out how to put a %a into the title of the dialog so this is a hack
+	// 
 	char szDialogForm[1024] = { 0 };
-
 	qsnprintf(szDialogForm, sizeof(szDialogForm)/sizeof(szDialogForm[0]), szPreDialogForm, (uint32)address, "%/");
 
-	if (AskUsingForm_c(szDialogForm, mycallback, g_szKey, &g_FileLength, &g_rbSelection) == 1)
+	if (AskUsingForm_c(szDialogForm, DialogCallback, g_szKey, &g_FileLength, &g_rbSelection) == 1)
 	{
+		//
+		// and make sure again that the size is ok
+		//
 		if (g_FileLength == 0 || g_FileLength < 0)
 		{
 			g_FileLength = GetLoadedFileSize();
@@ -469,7 +472,6 @@ void idaapi run(int)
 		case 4:	// shr
 		case 5:	// rol
 		case 6:	// ror
-
 
 		default:
 			msg("unknown selection: %u\n", g_rbSelection);
